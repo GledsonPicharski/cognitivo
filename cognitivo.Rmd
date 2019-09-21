@@ -1,0 +1,383 @@
+---
+title: "Teste Data Science \n Cognitivo.Ai"
+author: "Gledson L. Picharski"
+date: "`r format(Sys.time(), '%d/%m/%Y')`"
+output:
+  word_document:
+    reference_docx: word-styles-reference-01.docx
+    toc: yes
+toc-title: "Sumário"
+knit: 
+  encoding: native.enc
+---
+
+> .
+
+```{r ,warning= FALSE,message=FALSE,echo=FALSE,eval=FALSE}
+##### Objetivo: Criar um modelo para estimar a qualidade do vinho.
+## 1. Faça uma análise exploratória para avaliar a consistência dos dados e identificar possíveis variáveis que impactam na qualidade do vinho.
+
+## 2. Para a realização deste teste você pode utilizar o software de sua preferência (Python ou R), só pedimos que compartilhe conosco o código fonte (utilizando um repositório git). Além disso, inclua um arquivo README.md onde você deve cobrir as respostas para os 5 pontos abaixo:
+
+```  
+
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+suppressPackageStartupMessages(suppressWarnings(library(knitr)))
+suppressPackageStartupMessages(suppressWarnings(library(pander)))
+
+
+suppressPackageStartupMessages(suppressWarnings(library(corrplot)))
+suppressPackageStartupMessages(suppressWarnings(library(ggplot2)))
+
+suppressPackageStartupMessages(suppressWarnings(library(randomForest)))
+suppressPackageStartupMessages(suppressWarnings(library(xgboost)))
+suppressPackageStartupMessages(suppressWarnings(library(caret)))
+
+
+set.alignment(default = "left", row.names = "left", permanent = TRUE)
+panderOptions("table.emphasize.rownames",FALSE)
+panderOptions("table.split.table",Inf)
+panderOptions("table.style","simple")
+panderOptions('knitr.auto.asis', FALSE)
+.GlobalEnv$tb_i = 0
+.GlobalEnv$fg_i = 0
+
+opts_chunk$set(echo=FALSE,message=FALSE,results = "asis") # important for making sure the output will be well formatted.
+
+df <- read.csv2("winequality.csv", stringsAsFactors = FALSE,na.string=c("",NA),dec=".")
+``` 
+
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+
+## Criando Funções 
+
+ff.p <- function(pp){
+  ifelse(pp < 0.05,paste("**",ifelse(pp<0.001,"<0.001",round(pp,3)),"**",sep=""),round(pp,3))
+}
+
+ff.pander <- function(x,...){
+  .GlobalEnv$tb_i = .GlobalEnv$tb_i+1
+  panderOptions("table.caption.prefix",paste("*Tabela ",.GlobalEnv$tb_i," -* ",sep=""))
+  pander(x,...)
+  cat("\\\ \n \n ","    ",sep="\n\n")
+}
+
+fs1 <- function(xx,mk=TRUE,...){
+    resp <- do.call("rbind",lapply(xx,function(x){
+    x <- na.exclude(as.numeric(as.character(x)));  N <- length(x);  Min <- min(x)
+    Max <- max(x);  Median <- median(x);  Média <- mean(x)
+    SD <- sd(x)
+    tt <- quantile(x,c(0.25,0.75))
+    names(tt) <- NULL
+    resp <- c(N=N,Min=Min,"1º Quartil"=tt[1],Mediana=Median,"3º Quartil"=tt[2],Max=Max,Média=round(Média,2),DP=round(SD,2))
+    names(resp) <- enc2native(names(resp)) 
+    return(resp)}))
+    if(mk==FALSE){return(resp)}
+    .GlobalEnv$tb_i = .GlobalEnv$tb_i+1
+    panderOptions("table.caption.prefix",paste("*Tabela ",.GlobalEnv$tb_i,":* ",sep=""))
+    pander(resp,...)
+    cat("\\\ \n \n ","    ",sep="\n\n")
+}
+ft1 <- function(xx,...){
+  resp <- do.call("rbind",lapply(1:length(xx),function(i){
+    tt1 <- table(xx[[i]])
+    tt2 <- cbind(paste(tt1, " (",round(prop.table(tt1)*100,1),")",sep=""))
+    tt <- rbind("\\\  \\\  ",tt2)
+    rownames(tt) <- enc2native(c(names(xx)[i],paste("\\\  \\\  ",names(tt1))))
+    colnames(tt) <- "**Quantidade (%)**"
+    tt
+  }))
+  .GlobalEnv$tb_i = .GlobalEnv$tb_i+1
+  panderOptions("table.caption.prefix",paste("*Tabela ",.GlobalEnv$tb_i,":* ",sep=""))
+  pander(resp,...)
+  cat("\\\ \n \n ","    ",sep="\n\n")
+}
+``` 
+
+# Introdução
+
+O objetivo deste trabalho é demonstrar habilidades técnicas para resolver problemas de Data Science, neste sentido atenderei aos itens propostos (explorar os dados e desenvolver o modelo). Neste trabalho incluo meus comentários para esclarecer sobre a linha de raciocínio que segui.
+
+# Verificação inicial de variáveis
+
+Num primeiro momento verifico as características gerais dos dados, o intuito aqui é entender se os dados foram carregados da forma adequada, se valores numéricos estão representados como numéricos e strings como strings, se não aparece algo estranho logo de início.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE, results='markup'}
+str(df)
+```  
+
+Vemos que a variável "alcohol" está como character quando deveria ser numérica, isso ocorre geralmente quando existem caracteres indevidos no meio dos números, ou mesmo quando alguma formatação numérica é empregada em uma planilha antes de salvar o arquivo como csv, neste caso no R, uma forma de verificar quais dados estão diferentes de números é forçar a transformação para número e verificar o que fica como "NA".
+
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+linhasNA <- which(is.na(as.numeric(df$alcohol)))
+```  
+
+Usando o objeto linhasNA podemos obter as linhas com valores com caracteres que não permitiram a conversão em valor numérico, ou mesmo os que permitiram esta conversão da variável "alcohol". Pegando os valores convertidos para numéricos podemos fazer um resumo destes dados.
+
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+alcohol_num <- as.numeric(df$alcohol[-linhasNA]) ## valores numéricos da variável alcohol.
+ff.pander(cbind(summary(alcohol_num)),caption="Resumo da variável alcohol apenas para os valores passíveis de conversão em numérico")
+``` 
+
+Com o resumo observamos que o valor mínimo é de 8 e o máximo é de 14.9. Ao observar a seguir os valores que não foram convertidos em numéricos uma suspeita é de que ocorreu alguma falha de formatação numérica em alguma planilha. 
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+## df[linhasNA,]
+ff.pander(cbind(head(df$"alcohol"[linhasNA])),caption="Primeiros valores da variável alcohol que não puderam inicialmente ser convertidos para numéricos.")
+``` 
+
+Neste caso algumas atitudes poderiam ser tomadas:
+
+* Assumir que houve um erro de formação e forçar que a casa decimal seja colocada nestes números respeitando os valores mínimo e máximo.
+* Eliminar estes registros.
+* Questionar o cliente sobre estes valores.
+
+Qualquer que seja a escolha, é importante apresentar a escolha e confirmar com o cliente se é a escolha mais adequada. 
+Neste caso, vou seguir com a primeira opção.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+valor_2digitos <- as.numeric(substring(df$"alcohol"[linhasNA],1,2))
+valor_restante <- as.numeric(paste0(0,".",gsub("\\.","",substring(df$"alcohol"[linhasNA],3,nchar(df$"alcohol"[linhasNA])))))
+
+valor_2digitos_corrigido <- ifelse(valor_2digitos> 14.9,valor_2digitos/10,valor_2digitos)
+
+## substituíndo os valores corrigidos no objeto original.
+df$alcohol[linhasNA] <- valor_2digitos_corrigido+valor_restante
+
+##transformando em numérico
+df$alcohol <- as.numeric(df$alcohol)
+``` 
+
+
+## Análise Exploratória Univariada
+
+Inicialmente verificamos as características gerais das variáveis do estudo individualmente, começamos então pelas variáveis numéricas. A seguir são apresentadas as medidas de resumo de cada variável numérica, a quantidade (N) é igual em todos por não termos valores faltantes em nenhuma das variáveis, o das variáveis são positivos, o que faz sentido no caso destes testes fisico-químicos. O desvio-padrão (DP) indica a variabilidade dos dados, a variação vai sempre ocorrer de acordo com cada tipo de variável.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+vars_num <- as.list(df[,-which(names(df) == "type")]) ## seleciona as variáveis numéricas e transforma em lista para passar para minha função de resumo.
+fs1(vars_num,caption="Resumo das variáveis numéricas.")
+``` 
+
+A seguir temos as quantidades e percentuais da variável Type.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+vars_cat <- list(Type= df[,"type"]) ## variável categórica.
+ft1(vars_cat,caption="Quantidades e percentuais da variável categórica Type.")
+``` 
+
+## Análise Bivariada
+
+Sabendo que o intuito é estimar a qualidade do vinho, temos a variável “quality” como variável resposta do modelo, assim devemos entender a relação das variáveis com a quality. Cada tipo de relação pode ser representada por um conjunto diferente de formas.
+
+A seguir temos a tabela de correlação entre quality e as variáveis numéricas.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+num_vars <- which(sapply(df, is.numeric)) #variáveis numéricas
+nome_num_vars <- names(num_vars) #nome das variáveis numéricas
+
+cor_num_vars <- cor(df[, nome_num_vars], use="pairwise.complete.obs") #correlação entre variáveis numéricas
+
+#sort on decreasing correlations with SalePrice
+cor_sorted <- as.matrix(sort(cor_num_vars[,'quality'], decreasing = TRUE))
+
+ff.pander(cor_sorted,caption="correlação entre qualidade e variáveis numéricas.")
+``` 
+
+Para representar visualmente estas correlações, temos a seguir as correlações acima de 0,10.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+ #select only high corelations
+cor_maiores <- names(which(apply(cor_sorted, 1, function(x) abs(x)>0.10)))
+cor_num_vars <- cor_num_vars[cor_maiores,cor_maiores]
+
+corrplot.mixed(cor_num_vars, tl.col="black", tl.pos = "lt") ## função do pacote corrplot
+``` 
+
+
+A seguir vemos o boxplot de alcohol para cada nota de qualidade, nota-se que em geral quanto maior os valores de alcohol maior é também a qualidade, de forma que parece existir alguma relação.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+ggplot(data=df, aes(x=as.factor(quality), y=alcohol))+ theme_bw() + 
+        geom_boxplot(col='blue') + labs(x='Quality') +
+        scale_y_continuous(breaks= seq(8, 16, by=2))
+
+```
+
+A seguir temos o boxplot da qualidade pelo tipo de vinho, aparentemente os dois tipos possuem qualidade similar.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+ggplot(data=df, aes(y=quality, x=type))+ theme_bw() + 
+        geom_boxplot(col='blue') + labs(x='Quality') +
+        scale_y_continuous(breaks= seq(2, 10, by=2))
+``` 
+
+# Modelagem 
+
+Existem diversos métodos de machine learning que poderiam ser empregados neste caso, entre eles xgboosting, gradient boosting, regressão, random forest, etc. Antes do desenvolvimento é possível fazer transformações nos dados, seja para mudar a distribuição, pela percepção conceitual da criação de uma nova variável ou mesmo para corrigir algo.
+
+Em cada uma das técnicas é possível investigar uma série de parâmetros em busca do melhor conjunto de parâmetros para cada modelo, com isso compara-se posteriormente os resultados de cada modelo já com os melhores parâmetros possíveis.
+
+É possível também fazer investigações iniciais e variar entre alterar variáveis, parâmetros e técnicas de machine learning, não existe um caminho único, pois as combinações são virutalmente infinitas de tudo que poderia ser feito em busca do melhor modelo.
+
+
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+id_train <-createDataPartition(y=df$quality,p=0.7,list=FALSE)
+df_train <- df[id_train,]
+df_test <- df[-id_train,]
+```
+
+Optei por fazer uma busca numa grade de parãmetros e apresentar o resultado de cada modelo já com os melhores parâmetros (o código que gera os modelo está configorado para não rodar por conta do tempo de processamento e os modelos resultantes já foram salvos em um objeto do R). As funções de custo visam representar a qualidade dos modelos, em alguns aspectos elas são subjetivas, pois cada contexto trará seu limite prático para estas métricas, o que se pode dizer é que medidas de erro quanto menor melhor (RMSE e MAE) e o R² quanto maior melhor. Como linha geral deseja-se um R² acima de 0,6.
+
+```{r eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE, results='asis', eval=FALSE}
+## xgboost
+tr_control <- trainControl(method = "cv", number = 5)
+xgb_grid <- expand.grid(nrounds=c(100,200,300,400), 
+                         max_depth = c(3:7),
+                         eta = c(0.05, 1),
+                         gamma = c(0.01),
+                         colsample_bytree = c(0.75),
+                         subsample = c(0.50),
+                         min_child_weight = c(0))
+
+# fit.xgb <- train(quality ~., data = df_train, method = "xgbTree",trControl=tr_control, tuneGrid = xgb_grid, tuneLength = 10)
+##xgb_fit$bestTune
+##   nrounds max_depth  eta gamma colsample_bytree min_child_weight subsample
+## 49    1000         6 0.05     0                1                4         1
+xgb_grid <- expand.grid(nrounds=10000, 
+                         max_depth = 6,
+                         eta = 0.05,
+                         gamma = 0.01,
+                         colsample_bytree = 1,
+                         subsample = 1,
+                         min_child_weight = 4)
+fit.xgb <- train(quality ~., data = df_train, method = "xgbTree",trControl=tr_control, tuneGrid = xgb_grid, tuneLength = 10)
+
+##ctree2 with CV
+tr_control <- trainControl(method = 'cv', number=6, summaryFunction=defaultSummary)
+set.seed(2019)
+#ctree_grid <- expand.grid(maxdepth = seq(15, 50,5),mincriterion=0.95)
+#fit.ctree2CV <- train(quality ~ ., data=df_train, method = 'ctree2', trControl=tr_control,tuneGrid=ctree_grid,metric='RMSE')
+##fit.ctree2CV$bestTune
+##  maxdepth mincriterion
+## 1       15         0.95
+ctree_grid <- expand.grid(maxdepth = 15,mincriterion=0.95)
+fit.ctree2CV <- train(quality ~ ., data=df_train, method = 'ctree2', trControl=tr_control,tuneGrid=ctree_grid,metric='RMSE')
+
+  
+#model2a: CART using rpart with CV
+set.seed(2019)
+tr_control <- trainControl(method = 'cv', number=6)
+#rpart_grid <- expand.grid(cp=seq(0, 0.05, 0.005))
+rpart_grid <- expand.grid(cp=0.05)
+fit.rpartCV <- train(quality ~ ., data=df_train, method = 'rpart', trControl=tr_control, metric='RMSE',maximize=FALSE, tuneGrid = rpart_grid)
+
+##model2b: rpart2 with CV
+set.seed(123)
+tr_control <- trainControl(method = 'cv', number=6)
+## rpart2_grid <-expand.grid(.maxdepth=seq(5,20,5))
+rpart2_grid <-expand.grid(.maxdepth=5)
+fit.rpart2CV <- train(quality ~ ., data=df_train, method = 'rpart2', trControl=tr_control, metric = 'RMSE', maximize=FALSE, tuneGrid=rpart2_grid)
+
+
+# random forest
+set.seed(2019)
+tr_control <- trainControl("cv",number=4)
+## rf_grid <- expand.grid(mtry = seq(4,16,4))
+rf_grid <- expand.grid(mtry = 4)
+fit.rf.cv <- train(quality ~ ., data=df_train, method='rf', trControl=tr_control,tuneGrid=rf_grid,metric='RMSE')
+
+modelos <- list(
+    xgb = fit.xgb,
+    ctree = fit.ctree2CV,
+    rpart2 = fit.rpart2CV,
+    rpart = fit.rpartCV,
+    rf = fit.rf.cv)
+save( modelos,file = "modelos.Rdata")
+``` 
+
+Assim temos na tebela a seguir os resultados de RMSE, R² e MAE para cada um dos modelos no conjunto de treino. Nota-se que o R² está abaixo de 0,5 para maioria das técnicas escolhidas, temos o random forest e o XGboosting com os melhores valores de R².
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE,results='hide'}
+load("modelos.Rdata")
+result= list(
+    xgb = postResample(pred = predict(modelos$xgb,df_train,objective = "reg:squarederror"), obs=df_train$quality),
+    ctree = postResample(pred = predict(modelos$ctree,df_train), obs=df_train$quality),
+    rpart2 = postResample(pred = predict(modelos$rpart2,df_train,), obs=df_train$quality),
+    rpart = postResample(pred = predict(modelos$rpart,df_train), obs=df_train$quality),
+    rf = postResample(pred = predict(modelos$rf,df_train), obs=df_train$quality)
+)
+
+result_testing =list(
+  xgb = postResample(pred = predict(modelos$xgb,df_test,objective = "reg:squarederror"), obs=df_test$quality),
+  ctree = postResample(predict(modelos$ctree,df_test),df_test$quality),
+  rpart2 = postResample(predict(modelos$rpart2,df_test),df_test$quality),
+  rpart = postResample(predict(modelos$rpart,df_test),df_test$quality),
+  rf = postResample(predict(modelos$rf,df_test),df_test$quality))
+
+```
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+ff.pander(do.call("rbind",result),"Resultado dos modelos desenvolvidos para o conjunto de dados de treino.\\n \\n")
+``` 
+
+Ao avaliar as métricas de qualidade no conjunto de teste temos em geral medidas muito parecidas com as do treino para os modelos ctree, rpart e rpart2, já para o xgb e rf temos uma redução expressiva nos valores. Ainda assim o xgb se apresenta como o melhor modeo dentre os avaliados, sendo asism o modelo campeão.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+ff.pander(do.call("rbind",result_testing),"Resultado dos modelos desenvolvidos para o conjunto de dados de teste.\\n \\n")
+``` 
+
+A seguir podemos var então a importância de cada variável do modelo escolhido.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE,results='hide'}
+data_imp <- varImp(modelos$xgb)
+```
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+plot(data_imp)
+``` 
+
+> .
+
+# Respostas
+
+**a. Como foi a definição da sua estratégia de modelagem?**
+
+Inicialmente é importante explorar as variáveis tecnicamente, verificando se os dados foram carregados adequadamente e se estão no formato devido, na sequência vale entender as medidas descritivas de cada avariável para entender como cada uma delas se comporta. Uma análise bivariada ajuda a direcionar quais variáveis possuem mais relevância e por fim na parte de modelagem pode-se fazer a transformação de variáveis, engenharia de variáveis e finalmente a escolha do melhor modelo.
+
+**b. Como foi definida a função de custo utilizada?**
+
+Considerando a qualidade como valor numérico poderíamos definir a função de custo pelo erro da predição em relação ao observado ou pela correlação do predito pelo observado, as duas medidas mais comuns são R² e o RMSE (Root Mean Squart Error - Raiz do Erro quadrático médio).
+O RMSE é interessante para comparar um modelo em relação ao outro, mas é mais complicado de pensar nele por não ter uma escala específica. O R² por sua vez varia entre 0 e 1, de forma que valores mais próximos de 1 indicam maior qualidade do modelo, alguns podem colocar o ponto de corte de um modelo aceitável em 0,5, 0,6 ou mesmo em 0,7, mas na prática eu optaria pelo melhor modelo que me for possível.
+
+**c. Qual foi o critério utilizado na seleção do modelo final?**
+
+O modelo final é escolhido pela melhor medida de qualidade, neste caso pelo maior R². 
+
+**d. Qual foi o critério utilizado para validação do modelo? Por que escolheu utilizar este método?**
+
+Uma forma de validar o modelo, para evitar coisas como overfiting, é verificar medida de qualidade num conjunto que não foi utilizado na modelagem, por isso separa-se em conjunto de treino e de validação.
+
+**e. Quais evidências você possui de que seu modelo é suficientemente bom?**
+
+Utilizando o RMSE, quanto menor o erro melhor o modelo, em alguns aspectos a medida pode ser um pouco subjetiva, então enquanto RMSE estiver elevado (algo acima de 0,20) deveríamos buscar alternativas para melhorar o modelo, seja pela utilização de outras técnicas ou mesmo pela engenharia de variáveis.
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+
+``` 
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+
+``` 
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+
+``` 
+
+```{r, warning= FALSE,message=FALSE,echo=FALSE}
+
+``` 
