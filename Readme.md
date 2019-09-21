@@ -1,6 +1,6 @@
 # Introdução
 
-O Arquivo cognitivo.Rmd possuí os códigos em R bem como minhas explicações para cada passo do projeto.
+O Arquivo cognitivo.Rmd possuí os códigos em R bem como minhas explicações para cada passo do projeto, bem como o arquivo cognitivo.docx apresenta, em formato word, os resultados do processamento do arquivo Rmd.
 
 
 # Respostas
