@@ -1,3 +1,8 @@
+# Introdução
+
+O Arquivo cognitivo.Rmd possuí os códigos em R bem como minhas explicações para cada passo do projeto.
+
+
 # Respostas
 
 **a. Como foi a definição da sua estratégia de modelagem**
